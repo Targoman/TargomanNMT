@@ -107,6 +107,7 @@ cuda_add_executable(
 cuda_add_executable(
   amun_rest_server
   server/rest_server.cpp
+  server/gason.cpp
   gpu/decoder/best_hyps.cu
   gpu/decoder/encoder_decoder.cu
   gpu/decoder/encoder_decoder_loader.cu
@@ -199,6 +200,7 @@ add_executable(
 add_executable(
   amun_rest_server
   server/rest_server.cpp
+  server/gason.cpp
   common/loader_factory.cpp
   $<TARGET_OBJECTS:libcnpy>
   $<TARGET_OBJECTS:cpumode>
