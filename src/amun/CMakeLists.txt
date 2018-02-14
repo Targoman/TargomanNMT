@@ -104,6 +104,32 @@ cuda_add_executable(
   $<TARGET_OBJECTS:libcnpy>
 )
 
+cuda_add_executable(
+  amun_rest_server
+  server/rest_server.cpp
+  gpu/decoder/best_hyps.cu
+  gpu/decoder/encoder_decoder.cu
+  gpu/decoder/encoder_decoder_loader.cu
+  gpu/decoder/encoder_decoder_state.cu
+  gpu/dl4mt/encoder.cu
+  gpu/dl4mt/gru.cu
+  gpu/dl4mt/model.cu
+  gpu/mblas/handles.cu
+  gpu/mblas/matrix.cu
+  gpu/mblas/matrix_functions.cu
+  gpu/mblas/nth_element.cu
+  gpu/mblas/nth_element_kernels.cu
+  gpu/npz_converter.cu
+  gpu/types-gpu.cu
+
+
+  common/loader_factory.cpp
+  $<TARGET_OBJECTS:libcommon>
+  $<TARGET_OBJECTS:cpumode>
+  $<TARGET_OBJECTS:libyaml-cpp-amun>
+  $<TARGET_OBJECTS:libcnpy>
+)
+
 if(PYTHONLIBS_FOUND)
 cuda_add_library(python SHARED
   python/amunmt.cpp
@@ -170,6 +196,16 @@ add_executable(
   $<TARGET_OBJECTS:libyaml-cpp-amun>
 )
 
+add_executable(
+  amun_rest_server
+  server/rest_server.cpp
+  common/loader_factory.cpp
+  $<TARGET_OBJECTS:libcnpy>
+  $<TARGET_OBJECTS:cpumode>
+  $<TARGET_OBJECTS:libcommon>
+  $<TARGET_OBJECTS:libyaml-cpp-amun>
+)
+
 if(PYTHONLIBS_FOUND)
 add_library(python SHARED
   python/amunmt.cpp
@@ -184,7 +220,7 @@ set_target_properties("python" PROPERTIES OUTPUT_NAME "amunmt")
 endif(PYTHONLIBS_FOUND)
 endif(CUDA_FOUND)
 
-SET(EXES "amun")
+SET(EXES "amun" "amun_rest_server")
 
 if(PYTHONLIBS_FOUND)
 SET(EXES ${EXES} "python")
