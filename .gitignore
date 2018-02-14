@@ -79,3 +79,4 @@ _Inline
 *.pyc
 *.pdf
 *.tgz
+CMakeLists.txt.user
