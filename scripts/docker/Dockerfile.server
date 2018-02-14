@@ -1,0 +1,33 @@
+FROM nvidia/cuda:8.0-cudnn6-runtime-ubuntu16.04
+LABEL maintainers "S.Mehran M.ziabary <zaiabry@targoman.com>, Behrooz Vedadian <vedadian@targoman.com>"
+
+RUN mkdir -p /nmt/bin /nmt/models
+
+WORKDIR /nmt
+
+COPY "./build/amun_rest_server" "./scripts/runServer.sh" "/nmt/bin/"
+
+RUN echo > /etc/apt/sources.list.d/nvidia-ml.list && \
+    echo > /etc/apt/sources.list.d/cuda.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libboost-system1.58.0 \
+        libboost-filesystem1.58.0 \
+        libboost-program-options1.58.0 \
+        libboost-timer1.58.0 \
+        libboost-iostreams1.58.0 \
+        libboost-python1.58.0 \
+        libboost-thread1.58.0 \
+        libboost-chrono1.58.0 \
+        libevent-2.0-5 \
+        libqt5core5a \
+        libqt5network5 \
+    && rm -rf /var/lib/apt/lists/*
+
+EXPOSE 5000
+
+WORKDIR /nmt/bin
+
+VOLUME /nmt/models
+
+ENTRYPOINT [ "./runServer.sh" , ${SERVER_NAME}, ${SOURCE_LANGUAGE}, ${TARGET_LANGUAGE}, ${GPU}, ${MODEL_NAME} ]
