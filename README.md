@@ -26,7 +26,8 @@
     <li> Fast multi-gpu training and translation </li>
     <li> Compatible with Nematus and DL4MT </li>
     <li> Efficient pure C++ implementation </li>
-    <li> Permissive open source license (MIT) </li>
+    <li> Most of the source in Permissive open source license (MIT) and part of has LGPLv3 License</li>
+    <li> Rest server to be used in productions </li>
     <li> <a href="https://marian-nmt.github.io/features/"> more details... </a> </li>
   </ul>
   </p>
