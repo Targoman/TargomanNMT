@@ -30,4 +30,4 @@ WORKDIR /nmt/bin
 
 VOLUME /nmt/models
 
-ENTRYPOINT [ "./runServer.sh" , ${SERVER_NAME}, ${SOURCE_LANGUAGE}, ${TARGET_LANGUAGE}, ${GPU}, ${MODEL_NAME} ]
+ENTRYPOINT [ "/nmt/bin/runServer.sh" , ${SERVER_NAME}, ${SOURCE_LANGUAGE}, ${TARGET_LANGUAGE}, ${GPU}, ${MODEL_NAME} ]
