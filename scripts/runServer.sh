@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 ServerName=$1
 SourceLang=$2
