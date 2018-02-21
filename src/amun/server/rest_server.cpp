@@ -20,8 +20,9 @@
  ******************************************************************************/
 /**
  * @author Behrooz Vedadian <vedadian@targoman.com>
+ * @author S.Mehran M.Ziabary <ziabary@targoman.com>
  */
- 
+
 #include <stdexcept>
 #include <iostream>
 #include <memory>
@@ -35,6 +36,7 @@
 #include <regex>
 #include <functional>
 #include <evhttp.h>
+#include <algorithm>
 
 #include <cstdlib>
 #include <boost/timer/timer.hpp>
@@ -57,8 +59,37 @@
 using namespace amunmt;
 
 static std::string SERVER_NAME = "";
+// trim from start (in place)
+static inline void ltrim(std::string &s) {
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](int ch) {
+        return !std::isspace(ch);
+    }));
+}
 
-void GetPrimaryIp(char* buffer, size_t buflen) 
+// trim from end (in place)
+static inline void rtrim(std::string &s) {
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](int ch) {
+        return !std::isspace(ch);
+    }).base(), s.end());
+}
+
+// trim from both ends (in place)
+static inline std::string& trim(std::string &s) {
+    ltrim(s);
+    rtrim(s);
+    return s;
+}
+
+std::string replaceAll(std::string str, const std::string& from, const std::string& to) {
+    size_t start_pos = 0;
+    while((start_pos = str.find(from, start_pos)) != std::string::npos) {
+        str.replace(start_pos, from.length(), to);
+        start_pos += to.length(); // Handles case where 'to' is a substring of 'from'
+    }
+    return str;
+}
+
+void GetPrimaryIp(char* buffer, size_t buflen)
 {
     assert(buflen >= 16);
 
@@ -97,12 +128,15 @@ std::string getPostBody(evhttp_request *_request)
     return result;
 }
 
-typedef std::tuple<std::vector<std::string>, std::vector<std::string>> InputLines_t;
+typedef std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<int>> InputLines_t;
+
+const std::regex gLineEnderRegEx(" [\\.\\?\\!] ");
 
 InputLines_t getTextLines(std::string _body)
 {
     std::vector<std::string> srcs;
     std::vector<std::string> origs;
+    std::vector<int> originalLineNumbers;
     Json::JsonValue value;
     Json::JsonAllocator allocator;
     char *s = (char *)_body.data();
@@ -112,6 +146,7 @@ InputLines_t getTextLines(std::string _body)
         throw std::runtime_error("Input is not a valid JSON string.");
     if(value.getTag() != Json::JSON_ARRAY)
         throw std::runtime_error("Input string must be a JSON array.");
+    int LineIndex = 0;
     for(auto e : value) {
         if(e->value.getTag() != Json::JSON_OBJECT)
             throw std::runtime_error("Each element of the input array must be an object containing `src` and `orig` fields.");
@@ -128,13 +163,29 @@ InputLines_t getTextLines(std::string _body)
             //     orig = i->value.toString();
             // }
         }
-        srcs.push_back(src);
+
+        std::string Src = src;
+        int i = 0;
+        std::smatch LineEnderMatch;
+        std::cout << "GET_TEXT_LINE: " << Src << std::endl;
+        while(std::regex_search(Src, LineEnderMatch, gLineEnderRegEx)) {
+            int j = LineEnderMatch.position() + 2;
+            srcs.push_back(Src.substr(i, j - i));
+            originalLineNumbers.push_back(LineIndex);
+            Src = LineEnderMatch.suffix();
+        }
+        if(Src.size()) {
+            srcs.push_back(Src);
+            originalLineNumbers.push_back(LineIndex);
+        }
         if(orig == nullptr)
             origs.push_back(std::string());
         else
             origs.push_back(orig);
+        ++LineIndex;
     }
-    return InputLines_t(srcs, origs);
+
+    return InputLines_t(srcs, origs, originalLineNumbers);
 }
 
 template<typename T>
@@ -150,9 +201,15 @@ void evbuffer_add_printf_array(evbuffer* _buff, char* _format, const T& _array) 
     evbuffer_add_printf(_buff, "]");
 }
 
+
 template<>
 void evbuffer_add_printf_array<std::string>(evbuffer* _buff, char* _format, const std::string& _array) {
-    evbuffer_add_printf(_buff, _format, (char *)_array.data());
+    if(_array == "<NULL>")
+        evbuffer_add_printf(_buff, _format, " ");
+    else {
+        std::string normal = replaceAll(_array, "<PIPE>", "|");
+        evbuffer_add_printf(_buff, _format, (char *)replaceAll(normal, "\"","\\\"").data());
+    }
 }
 
 template<>
@@ -169,9 +226,9 @@ void sendResults(
     auto *OutBuf = evhttp_request_get_output_buffer(_request);
     if (!OutBuf) {
         evhttp_send_error(_request, HTTP_INTERNAL, "{ \"code\": 500, \"msg\": \"Internal server error.\" }");
-        return;        
+        return;
     }
-    
+
     bool First = true;
     evbuffer_add_printf(OutBuf, "{\"rslt\":[");
     for(size_t Index = 0; Index < _source.size(); ++Index) {
@@ -210,6 +267,12 @@ void saveAlignmentsToList(const HypothesisPtr& hypothesis, size_t target_size, s
     copy.resize(source_size - 1);
     aligns.insert(aligns.begin(), copy);
     last = last->GetPrevHyp();
+  }
+  for(int i = (int)aligns.size(); i < (int)target_size - 1; ++i) {
+    SoftAlignment dummy;
+    dummy.resize(source_size - 1);
+    dummy[dummy.size() - 1] = 1.0;
+    aligns.insert(aligns.begin(), dummy);
   }
   alignment.SourceSize = source_size - 1;
   alignment.TargetSize = target_size - 1;
@@ -292,7 +355,12 @@ void translate(std::vector<std::string>& _lines, God& __GOD__, std::vector<std::
 
   sentences_by_lineno.resize(_lines.size());
   for(int lineNum = 0; lineNum < _lines.size(); ++lineNum) {
-    std::string& line = _lines[lineNum];
+    std::string& line = trim(_lines[lineNum]);
+
+
+    if (line.empty()) line = "<NULL>";
+    else line = replaceAll(line, "|", "<PIPE>");
+    LOG(info)->info("Creating batch: <" + line + ">");
 
     std::vector<std::string> __words;
     Split(line, __words, " ");
@@ -498,29 +566,34 @@ void handleRequest(evhttp_request *_request, void *context)
         boost::timer::cpu_timer timer;
 
         InputLines_t SrcAndOrigs = getTextLines(getPostBody(_request));
-
         std::vector<std::string>& Lines = std::get<0>(SrcAndOrigs);
-        std::vector<std::string>& Origs = std::get<1>(SrcAndOrigs);
+        
+        LOG(info)->info("Found {} lines in {}", Lines.size(), timer.format());
 
+        
+        std::vector<std::string>& Origs = std::get<1>(SrcAndOrigs);
+        std::vector<int>& OriginalLineNumbers = std::get<2>(SrcAndOrigs);
+        
         God &__GOD__ = *(God *)context;
 
         std::vector<NBestTranslations_t> Translations;
         std::vector<std::vector<Alignment_t>> Alignments;
         std::vector<std::vector<std::string>> SourceTokens;
-        
-        LOG(info)->info("Found {} lines in {}", Lines.size(), timer.format());
 
         translate(Lines, __GOD__, SourceTokens, Translations, Alignments);
 
         LOG(info)->info("Translation took {}", timer.format());
 
+        std::vector<std::vector<std::string>> AllSourceTokens;
         std::vector<std::vector<std::vector<std::string>>> AllPhrases;
         std::vector<std::vector<std::vector<int>>> AllAlignments;
         std::vector<std::vector<std::vector<std::tuple<int, int>>>> AllOrigAlignments;
 
+        int PreviousOriginalLineNumber = -1;
         for(size_t Index = 0; Index < Lines.size(); ++Index) {
             std::vector<std::string>& Line = SourceTokens[Index];
-
+            int CurrentOriginalLineNumber = OriginalLineNumbers[Index];
+            
             NBestTranslations_t& LineTranslations = Translations[Index];
             std::vector<Alignment_t>& LineAlignments = Alignments[Index];
 
@@ -531,7 +604,7 @@ void handleRequest(evhttp_request *_request, void *context)
             //         std::cerr << LineAlignments[0].M[iiii * LineAlignments[0].SourceSize + jjjj] << ", ";
             //     std::cerr << std::endl;
             // }
-            // for(size_t iiii=0; iiii < BestTranslation.size(); ++iiii) 
+            // for(size_t iiii=0; iiii < BestTranslation.size(); ++iiii)
             //     std::cerr << BestTranslation[iiii] << ": " << iiii << std::endl;
             // for(size_t iiii=0; iiii < WordMapping.size(); ++iiii) {
             //     int jjjj = WordMapping[iiii];
@@ -540,7 +613,6 @@ void handleRequest(evhttp_request *_request, void *context)
 
             std::vector<std::vector<std::string>> Phrases;
             std::vector<std::vector<int>> Alignments;
-            std::vector<std::vector<std::tuple<int, int>>> OrigAlignments;
             size_t PhraseCount = 0;
 
             size_t LastSourceIndex = (size_t)-1;
@@ -559,7 +631,52 @@ void handleRequest(evhttp_request *_request, void *context)
                 }
                 LastSourceIndex = SourceIndex;
             }
+            
+            /*
+            for(int NGram=1; NGram <= 5; ++NGram) {
+                std::cout << "NGram=" << NGram << std::endl;
+                std::vector<std::pair<std::string, int>> ToCheck;
+                for(int i=0; i < NGram; ++i)
+                    ToCheck.push_back(std::make_pair(std::string("<NEVER>"), (int)-1));
 
+                std::vector<std::vector<int>> ProcessedAlignments;
+                std::vector<std::vector<std::string>> ProcessedPhrases;
+                
+                int i = 0;
+                while(i < Alignments.size()) {
+                    bool Similar = true;
+                    if(NGram + i - 1 < Alignments.size()) {
+                        std::cout << "NGram + i - 1=" << (NGram + i - 1) << ", Alignments.size()=" << Alignments.size() << std::endl;
+                        for(int j=0; j < NGram; ++j) {
+                            std::cout << "i=" << i << ", j=" << j << ", Phrases.size()=" << Phrases.size() << ", Alignments.size()=" << Alignments.size() <<  ToCheck[j].first << " vs. " << Phrases[j + i][0] << ", " << ToCheck[j].second << " vs. " << Alignments[j + i][0] << std::endl;
+                            if(ToCheck[j].first != Phrases[j + i][0] || ToCheck[j].second != Alignments[j + i][0]) {
+                                Similar = false;
+                                break;
+                            }
+                        }
+                    }else {
+                        Similar = false;
+                    }
+                    std::cout << "i=" << i << ", Similar=" << Similar << std::endl;
+                    if(Similar == false) {
+                        ProcessedAlignments.push_back(Alignments[i]);
+                        ProcessedPhrases.push_back(Phrases[i]);
+                        for(int j=0; j < NGram - 1; ++j)
+                            ToCheck[j] = ToCheck[j+1];
+                        ToCheck[NGram-1] = std::make_pair(Phrases[i][0], Alignments[i][0]);
+                        std::cout << "Did not skip" << std::endl;
+                    }
+                    else {
+                        i = i + NGram - 1;
+                        std::cout << "Skipped" << std::endl;
+                    }
+                    i++;
+                }
+                Alignments = ProcessedAlignments;
+                Phrases = ProcessedPhrases;
+            }
+            */
+            
             for(size_t NBestIndex = 1; NBestIndex < LineTranslations.size(); ++NBestIndex) {
                 std::vector<std::string>& TranslationCandidate = LineTranslations[NBestIndex];
                 std::vector<int> WordMapping = getHardAlignment(LineAlignments[NBestIndex]);
@@ -592,12 +709,31 @@ void handleRequest(evhttp_request *_request, void *context)
                 }
             }
 
-            AllPhrases.push_back(Phrases);
-            AllAlignments.push_back(Alignments);
-            AllOrigAlignments.push_back(OrigAlignments);
+            if(PreviousOriginalLineNumber == CurrentOriginalLineNumber) {
+                auto& LastLine = AllSourceTokens[AllSourceTokens.size() - 1];
+                auto& LastPhrases = AllPhrases[AllPhrases.size() - 1];
+                auto& LastAlignments = AllAlignments[AllAlignments.size() - 1];
+                int SourceOffset = LastLine.size();
+                int TargetOffset = LastPhrases.size();
+                for(const auto& Word : Line)
+                    LastLine.push_back(Word);
+                for(const auto& Phrase : Phrases)
+                    LastPhrases.push_back(Phrase);
+                for(const auto& A : Alignments) {
+                    std::vector<int> UpdatedAlignments;
+                    for(auto a : A)
+                        UpdatedAlignments.push_back(a + SourceOffset);
+                    LastAlignments.push_back(UpdatedAlignments);
+                }
+            } else {
+                AllSourceTokens.push_back(Line);
+                AllPhrases.push_back(Phrases);
+                AllAlignments.push_back(Alignments);
+            }
+            PreviousOriginalLineNumber = CurrentOriginalLineNumber;
         }
 
-        sendResults(_request, SourceTokens, AllPhrases, AllAlignments);
+        sendResults(_request, AllSourceTokens, AllPhrases, AllAlignments);
 
     } catch(std::exception& e) {
         std::cerr << "Exception during handling request: " << e.what() << std::endl;
@@ -706,8 +842,6 @@ int main(int argc, char *argv[])
         Pool.push_back(std::move(Thread));
     }
 
-    /*std::cout << "Press `Enter` to quit." << std::endl;
-    #std::cin.get();*/
     while(true) sleep(1);
     Done = true;
 }
